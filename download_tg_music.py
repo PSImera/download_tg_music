@@ -42,19 +42,32 @@ def parse_release(text: str) -> str:
         return None
 
     artist = m.group("artist").strip()
+    if artist == "V.A":
+        artist = "VA"
+
     album = m.group("album").strip()
+    album = re.sub(
+        r"\(Compiled[^)]*\)", "", album
+    ).strip()  # удалить (Compiled ...) из названия альбома
+
     year = m.group("year")
     is_ep = bool(m.group("ep"))
 
-    label = "Unknown"
+    label = None
     for line in lines:
         lm = re.search(r"^Label:\s*#([A-Za-z0-9_]+)", line)
         if lm:
             label = clean_label(lm.group(1))
             break
 
-    ep_part = " EP" if is_ep else ""
-    release = f"{artist} - {album} ({label}{ep_part} {year})"
+    if is_ep:
+        label = f"{label} EP"
+
+    if label:
+        release = f"{artist} - {album} ({label} {year})"
+    else:
+        release = f"{artist} - {album} ({year})"
+
     return re.sub(r'[\\/*?:"<>|]', "", release).strip()
 
 
@@ -108,7 +121,6 @@ async def handler(client: Client, message: Message):
         folder_path = os.path.join(ROOT_DIR, folder_name)
         os.makedirs(folder_path, exist_ok=True)
 
-        # Блокировка для скачивания обложки
         cover_path = os.path.join(folder_path, "Cover.png")
         async with cover_lock:
             if not os.path.exists(cover_path):
