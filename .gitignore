@@ -1,0 +1,4 @@
+.venv/
+.env
+my_session.session
+my_session.session-journal
