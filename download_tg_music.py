@@ -7,14 +7,14 @@ from tqdm import tqdm
 import asyncio
 
 load_dotenv()
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
-CHAT_ID = int(os.getenv("CHAT_ID"))
 ROOT_DIR = os.getenv("DOWNLOAD_DIR")
 
 os.makedirs(ROOT_DIR, exist_ok=True)
 
-app = Client("my_session", api_id=API_ID, api_hash=API_HASH)
+app = Client("my_session", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 release = None
 cover = None
@@ -93,7 +93,7 @@ def progress(current, total, file_name):
         del progress.pbars[file_name]
 
 
-@app.on_message(filters.chat(CHAT_ID))
+@app.on_message(filters.private)
 async def handler(client: Client, message: Message):
     global release, cover
 
