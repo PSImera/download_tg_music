@@ -1,0 +1,23 @@
+download_dir: 'D:\_!_New_!_\music_new'
+
+sources:
+
+  radio_boga:
+    release_pattern: '^(?P<artist>.+?)\s*-\s*(?P<album>.+?)(?P<ep>\s+EP)?\s*\[(?P<year>\d{4})\]'
+    label_pattern: '^Label:\s*#([A-Za-z0-9_]+)'
+    label_underline: true
+
+  psymusicru:
+    release_pattern: '^(?P<artist>.+?)\s*-\s*(?P<album>.+?)(?P<ep>\s+EP)?\s+(?P<year>\d{4})\s*$'
+    label_pattern: '^\(([^)]+)\)'
+    label_underline: false
+
+bandcamp_pattern: 'https?://[^\s]+\.bandcamp\.com/[^\s]+'
+
+default_metadata:
+  artist: "_unknown_artist"
+  album: "_unknown_release"
+  year: "0000"
+  is_ep: false
+  label: ""
+  bandcamp_link: null
