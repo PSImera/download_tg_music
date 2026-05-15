@@ -2,7 +2,8 @@ import os
 import re
 import yaml
 from dotenv import load_dotenv
-from pyrogram import Client, filters
+from pyrogram.client import Client
+from pyrogram import filters
 from pyrogram.types import Message
 from tqdm import tqdm
 import asyncio
@@ -10,9 +11,9 @@ import aiohttp
 
 load_dotenv()
 
-API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+API_ID = int(os.environ["API_ID"])
+API_HASH = os.environ["API_HASH"]
+BOT_TOKEN = os.environ["BOT_TOKEN"]
 
 with open("config.yaml", "r", encoding="utf-8") as f:
     CONFIG = yaml.safe_load(f)
@@ -32,19 +33,18 @@ for name, cfg in CONFIG["sources"].items():
 
 app = Client("my_session", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-release = None
-cover_msg = None
-bandcamp_url = None
-current_source = None
+release: str | None = None
+cover_msg: Message | None = None
+bandcamp_url: str | None = None
+current_source: str | None = None
 cover_lock = asyncio.Lock()
 
+_pbars: dict[str, tqdm] = {}
 
-def progress(current, total, file_name):
-    if not hasattr(progress, "pbars"):
-        progress.pbars = {}
 
-    if file_name not in progress.pbars:
-        progress.pbars[file_name] = tqdm(
+def progress(current: int, total: int, file_name: str) -> None:
+    if file_name not in _pbars:
+        _pbars[file_name] = tqdm(
             total=total,
             unit="B",
             unit_scale=True,
@@ -52,13 +52,13 @@ def progress(current, total, file_name):
             desc=file_name[:50],
         )
 
-    pbar = progress.pbars[file_name]
+    pbar = _pbars[file_name]
     pbar.n = current
     pbar.refresh()
 
     if current >= total:
         pbar.close()
-        del progress.pbars[file_name]
+        del _pbars[file_name]
 
 
 def preprocess_label(raw: str, underline: bool = False) -> str:
@@ -85,12 +85,14 @@ async def download_bandcamp_cover(url: str, dest_path: str) -> bool:
                 url, timeout=aiohttp.ClientTimeout(total=15)
             ) as resp:
                 if resp.status != 200:
-                    return None
+                    return False
                 html = await resp.text()
         m = re.search(r'<meta property="og:image"\s+content="([^"]+)"', html)
         if not m:
             m = re.search(r'<meta content="([^"]+)"\s+property="og:image"', html)
         img_url = m.group(1) if m else None
+        if img_url is None:
+            return False
 
         img_url = re.sub(r"_\d+\.jpg", "_0.jpg", img_url)
 
@@ -114,7 +116,7 @@ async def download_bandcamp_cover(url: str, dest_path: str) -> bool:
         return False
 
 
-def parse_metadata(text: str, release_rattern, label_pattern) -> dict:
+def parse_metadata(text: str, release_pattern, label_pattern) -> dict:
 
     result = DEFAULT_METADATA.copy()
     lines = [l.strip() for l in text.splitlines()]
@@ -126,7 +128,7 @@ def parse_metadata(text: str, release_rattern, label_pattern) -> dict:
 
         #  search for release pattern
         if not release_found:
-            m = release_rattern.search(line)
+            m = release_pattern.search(line)
             if not m:
                 continue
 
@@ -158,16 +160,15 @@ def parse_metadata(text: str, release_rattern, label_pattern) -> dict:
 
 def format_release_name(metadata: dict, label_underline: bool = False) -> str:
 
-    artist = metadata.get("artist").strip()
+    artist = (metadata.get("artist") or "").strip()
     if artist == "V.A":
         artist = "VA"
 
-    album = metadata.get("album")
-    album = re.sub(r"\(Compiled[^)]*\)", "", album).strip()
+    album = re.sub(r"\(Compiled[^)]*\)", "", metadata.get("album") or "").strip()
 
     year = metadata.get("year")
 
-    label = metadata.get("label")
+    label = metadata.get("label") or ""
     words_to_remove = {"records", "recordings", "productions"}
     if label_underline:
         parts = label.split("_")
@@ -197,14 +198,13 @@ async def handler(client: Client, message: Message):
     else:
         source = None
 
-    source_cfg = SOURCES.get(source)
-
     text = (
         message.caption if message.caption else (message.text if message.text else "")
     )
 
     if text:
         if source in SOURCES:
+            source_cfg = SOURCES[source]
             metadata = parse_metadata(
                 text, source_cfg["release_pattern"], source_cfg["label_pattern"]
             )
@@ -245,7 +245,7 @@ async def handler(client: Client, message: Message):
         cover_path = os.path.join(folder_path, "Cover.png")
         async with cover_lock:
             if not os.path.exists(cover_path):
-                if cover_msg.photo:
+                if cover_msg is not None and cover_msg.photo:
                     await cover_msg.download(file_name=cover_path)
                     print(f"✓ Telegram cover saved")
                 elif bandcamp_url:
