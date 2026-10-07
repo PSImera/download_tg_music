@@ -274,7 +274,7 @@ async def handler(client: Client, message: Message):
         os.makedirs(folder_path, exist_ok=True)
 
         # Save cover
-        await ensure_cover(album, os.path.join(folder_path, "Cover.png"))
+        await ensure_cover(album, folder_name, os.path.join(folder_path, "Cover.png"))
 
         # Save audio
         path = os.path.join(folder_path, file_name)
