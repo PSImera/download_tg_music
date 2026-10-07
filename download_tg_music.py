@@ -8,6 +8,7 @@ from pyrogram.types import Message
 from tqdm import tqdm
 import asyncio
 import aiohttp
+from dataclasses import dataclass
 
 load_dotenv()
 
@@ -33,12 +34,14 @@ for name, cfg in CONFIG["sources"].items():
 
 app = Client("my_session", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-release: str | None = None
-cover_msg: Message | None = None
-bandcamp_url: str | None = None
-current_source: str | None = None
-cover_lock = asyncio.Lock()
+@dataclass(frozen=True)
+class AlbumContext:
+    release: str
+    cover_msg: Message | None
+    bandcamp_url: str | None
 
+current_album: AlbumContext | None = None
+_cover_locks: dict[str, asyncio.Lock] = {}
 _pbars: dict[str, tqdm] = {}
 
 
@@ -74,6 +77,31 @@ def preprocess_label(raw: str, underline: bool = False) -> str:
 def extract_bandcamp_url(text: str) -> str | None:
     m = re.search(r"https?://[^\s]+\.bandcamp\.com/[^\s]+", text)
     return m.group(0) if m else None
+
+
+async def ensure_cover(album: AlbumContext, folder_name: str, cover_path: str) -> None:
+    """Saving cover: Telegram post first, Bandcamp as fallback"""
+    lock = _cover_locks.setdefault(cover_path, asyncio.Lock())
+    async with lock:
+        if os.path.exists(cover_path):
+            return
+
+        # Telegram
+        if album.cover_msg is not None and album.cover_msg.photo:
+            try:
+                await album.cover_msg.download(file_name=cover_path)
+                print(f"✓ Telegram cover saved: {folder_name}")
+                return
+            except Exception as e:
+                print(f"⚠ Could not download Telegram cover for {folder_name}: {e}")
+
+        # Bandcamp
+        if album.bandcamp_url:
+            print(f"  No Telegram cover for {folder_name}, trying Bandcamp: {album.bandcamp_url}")
+            if await download_bandcamp_cover(album.bandcamp_url, cover_path):
+                print(f"✓ Bandcamp cover saved: {folder_name}")
+            else:
+                print(f"⚠ Bandcamp cover not saved: {folder_name}")
 
 
 async def download_bandcamp_cover(url: str, dest_path: str) -> bool:
@@ -191,7 +219,8 @@ def format_release_name(metadata: dict, label_underline: bool = False) -> str:
 
 @app.on_message(filters.private)
 async def handler(client: Client, message: Message):
-    global release, cover_msg, bandcamp_url
+    global current_album
+    album = current_album
 
     if message.forward_from_chat:
         source = message.forward_from_chat.username
@@ -216,18 +245,21 @@ async def handler(client: Client, message: Message):
             metadata["album"] = f"_RELEASE[{message.id}]"
             release = format_release_name(metadata)
 
-        cover_msg = message
         bandcamp_url = extract_bandcamp_url(text)
 
+        current_album = AlbumContext(
+            release=release,
+            cover_msg=message,
+            bandcamp_url=bandcamp_url,
+        )
+
         print(f"✓ Detected album: {release} [source: {source}]")
-        if bandcamp_url:
-            print(f"  Bandcamp URL: {bandcamp_url}")
         return
 
     if message.audio:
         file_name = message.audio.file_name
 
-        if not release:
+        if album is None:
             path = os.path.join(ROOT_DIR, file_name)
             await message.download(
                 file_name=path, progress=lambda c, t: progress(c, t, file_name)
@@ -237,20 +269,12 @@ async def handler(client: Client, message: Message):
 
         # Determine format and create folder
         ext = file_name.split(".")[-1].upper()
-        folder_name = f"{release} -{ext}-" if ext != "MP3" else release
+        folder_name = f"{album.release} -{ext}-" if ext != "MP3" else album.release
         folder_path = os.path.join(ROOT_DIR, folder_name)
         os.makedirs(folder_path, exist_ok=True)
 
-        # Save cover (Bandcamp preferred, fallback to Telegram photo)
-        cover_path = os.path.join(folder_path, "Cover.png")
-        async with cover_lock:
-            if not os.path.exists(cover_path):
-                if cover_msg is not None and cover_msg.photo:
-                    await cover_msg.download(file_name=cover_path)
-                    print(f"✓ Telegram cover saved")
-                elif bandcamp_url:
-                    await download_bandcamp_cover(bandcamp_url, cover_path)
-                    print(f"✓ Bandcamp cover saved")
+        # Save cover
+        await ensure_cover(album, os.path.join(folder_path, "Cover.png"))
 
         # Save audio
         path = os.path.join(folder_path, file_name)
