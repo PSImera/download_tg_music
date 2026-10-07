@@ -2,4 +2,5 @@ python-dotenv
 pyyaml
 tqdm
 pyrogram
+tgcrypto
 aiohttp
